@@ -1,0 +1,19 @@
+{
+  "name": "Assignment 1 Dev Container with Claude",
+  "dockerComposeFile": "../docker-compose.yaml",
+  "service": "jupyter",
+  "workspaceFolder": "/app",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode.vscode-typescript-next",
+        "ms-python.python",
+        "esbenp.prettier-vscode",
+        "ms-toolsai.jupyter"
+      ]
+    }
+  },
+  "forwardPorts": [8888],
+  "postCreateCommand": "curl -fsSL https://claude.ai/install.sh | sh",
+  "shutdownAction": "stopCompose"
+}
