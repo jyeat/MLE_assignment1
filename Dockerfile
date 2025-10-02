@@ -1,15 +1,20 @@
-# last updated Mar 25 2025, 11:00am
+# Last updated 
 FROM python:3.12-slim
 
 # Set non-interactive mode for apt-get
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install wget, procps (for 'ps') and bash first
+# Install wget, curl, procps (for 'ps'), bash, and git
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends wget procps bash && \
+    apt-get install -y --no-install-recommends wget curl procps bash git && \
     rm -rf /var/lib/apt/lists/* && \
     # Ensure Spark's scripts run with bash instead of dash
     ln -sf /bin/bash /bin/sh
+
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs && \
+    node --version && npm --version && \
+    rm -rf /var/lib/apt/lists/*
 
 # Download and install Java 17 directly from Oracle/OpenJDK website
 RUN wget -O java17.tar.gz https://download.java.net/java/GA/jdk17.0.2/dfd4a8d0985749f896bed50d7138ee7f/8/GPL/openjdk-17.0.2_linux-x64_bin.tar.gz && \

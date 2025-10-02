@@ -18,35 +18,52 @@ def process_feature_gold_table(snapshot_date_str, silver_attributes_directory,si
     #prepare arguments
     snapshot_date=datetime.strptime(snapshot_date_str, "%Y-%m-%d")
 
-    # connect to silver table
+    # connect to silver attribute and finance table
     attr_partition_name="silver_attributes_"+ snapshot_date_str.replace('-','_') + '.parquet'
     attr_filepath=silver_attributes_directory + attr_partition_name
     df_attr=spark.read.parquet(attr_filepath)
-
-    click_partition_name="silver_clickstream_"+ snapshot_date_str.replace('-','_') + '.parquet'
-    click_filepath=silver_clickstream_directory + click_partition_name
-    df_click=spark.read.parquet(click_filepath)
 
     fin_partition_name="silver_financials_" + snapshot_date_str.replace('-','_') + '.parquet'
     fin_filepath=silver_financials_directory +fin_partition_name
     df_fin=spark.read.parquet(fin_filepath)
 
-    # Get recent clickstream activity- last 30 days
-    lookback_date=snapshot_date- timedelta(days=30)
-    df_click_recent=df_click.filter(
-        (col("snapshot_date") >= lookback_date) &
-        (col("snapshot_date") <= snapshot_date)
-    ).groupBy("Customer_ID").agg(
-        F.count('*').alias("visit_frequency"), #Counts number of visits
-        F.max('snapshot_date').alias("last_activity_date"), #most recent visit
-        F.sum('total_activity').alias("recent_total_activity"), #Sum of activities
-        F.avg('activity_intensity').alias("avg_activity_intensity"), #Avg of intensities
-        F.sum('active_features_count').alias("total_active_features") #Sum of active features
-    )
+    # Get last month clickstream data
+    prev_month_date=snapshot_date-relativedelta(months=1)
+    prev_month_str=prev_month_date.strftime("%Y_%m_%d")
+
+    #Load previous month's clickstream file
+    prev_click_partition_name=f"silver_clickstream_{prev_month_str}.parquet"
+    prev_click_filepath=silver_clickstream_directory + prev_click_partition_name
+
+    try:
+        df_click=spark.read.parquet(prev_click_filepath)
+
+        df_click_recent=df_click.groupBy("Customer_ID").agg(
+            F.count('*').alias("visit_frequency"), #Counts number of visits
+            F.max('snapshot_date').alias("last_activity_date"), #most recent visit
+            F.sum('total_activity').alias("recent_total_activity"), #Sum of activities
+            F.avg('activity_intensity').alias("avg_activity_intensity"), #Avg of intensities
+            F.sum('active_features_count').alias("total_active_features"), #Sum of active features
+        )
+    
+    except:
+        #fallback if no previous month clickstream data
+        print(f"Warning: No clickstream data found for previous month {prev_month_str}")
+        # Create empty dataframe with correct schema
+        from pyspark.sql.types import StructType, StructField
+        schema = StructType([
+            StructField("Customer_ID", StringType(), True),
+            StructField("visit_frequency", IntegerType(), True),
+            StructField("last_activity_date", DateType(), True),
+            StructField("recent_total_activity", FloatType(), True),
+            StructField("avg_activity_intensity", FloatType(), True),
+            StructField("total_active_features", IntegerType(), True)
+        ])
+        df_click_recent = spark.createDataFrame([], schema)
 
     #join table
     feature_df = df_attr.join(df_fin, on=["Customer_ID", "snapshot_date"], how="left")
-    feature_df = feature_df.join(df_click_recent, on="Customer_ID", how="left")
+    feature_df = feature_df.join(df_click_recent, on=["Customer_ID"], how="left")
 
     #aggregate    
     #financial health
@@ -61,9 +78,7 @@ def process_feature_gold_table(snapshot_date_str, silver_attributes_directory,si
     
     #drop unnessary columns
     feature_df=feature_df.drop("Name","SSN","SSN_is_valid","SSN_clean",'Occupation', 'age_group', #attributes
-                               "Monthly_Inhand_Salary", "Credit_History_Age","credit_risk_level", #finance
-                               "fe_1","fe_2","fe_3","fe_4","fe_5","fe_6","fe_7","fe_8","fe_9","fe_10",
-                                  "fe_11","fe_12","fe_13","fe_14","fe_15","fe_16","fe_17","fe_18","fe_19","fe_20") #clickstream
+                               "Monthly_Inhand_Salary", "Credit_History_Age","credit_risk_level") #finance
 
     
     # save gold table 
