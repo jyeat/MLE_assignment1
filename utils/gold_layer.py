@@ -31,21 +31,24 @@ def process_feature_gold_table(snapshot_date_str, silver_attributes_directory,si
     fin_filepath=silver_financials_directory +fin_partition_name
     df_fin=spark.read.parquet(fin_filepath)
 
+    # Get recent clickstream activity- last 30 days
+    lookback_date=snapshot_date- timedelta(days=30)
+    df_click_recent=df_click.filter(
+        (col("snapshot_date") >= lookback_date) &
+        (col("snapshot_date") <= snapshot_date)
+    ).groupBy("Customer_ID").agg(
+        F.count('*').alias("visit_frequency"), #Counts number of visits
+        F.max('snapshot_date').alias("last_activity_date"), #most recent visit
+        F.sum('total_activity').alias("recent_total_activity"), #Sum of activities
+        F.avg('activity_intensity').alias("avg_activity_intensity"), #Avg of intensities
+        F.sum('active_features_count').alias("total_active_features") #Sum of active features
+    )
+
     #join table
-    feature_df = df_attr.join(df_click, on=["Customer_ID", "snapshot_date"], how="left")
-    feature_df = feature_df.join(df_fin, on=["Customer_ID", "snapshot_date"], how="left")
+    feature_df = df_attr.join(df_fin, on=["Customer_ID", "snapshot_date"], how="left")
+    feature_df = feature_df.join(df_click_recent, on="Customer_ID", how="left")
 
-    #drop unnessary columns
-    feature_df=feature_df.drop("Name","SSN","SSN_is_valid","SSN_clean",'Occupation')
-
-    #aggregate
-    #feature completeness
-    feature_df = feature_df.withColumn("feature_completeness",
-      (F.when(F.col("Age").isNotNull(), 1).otherwise(0) +
-       F.when(F.col("Annual_Income").isNotNull(), 1).otherwise(0) +
-       F.when(F.col("total_activity").isNotNull(), 1).otherwise(0) +
-       F.when(F.col("Credit_Utilization_Ratio").isNotNull(), 1).otherwise(0)) /4)
-    
+    #aggregate    
     #financial health
     feature_df = feature_df.withColumn("financial_health_score",
                                        (F.when(F.col("Debt_to_income_ratio") < 0.3, 3)
@@ -55,6 +58,13 @@ def process_feature_gold_table(snapshot_date_str, silver_attributes_directory,si
                                          .when(F.col("Credit_Utilization_Ratio") < 70, 1)
                                          .otherwise(0)))
     
+    
+    #drop unnessary columns
+    feature_df=feature_df.drop("Name","SSN","SSN_is_valid","SSN_clean",'Occupation', 'age_group', #attributes
+                               "Monthly_Inhand_Salary", "Credit_History_Age","credit_risk_level", #finance
+                               "fe_1","fe_2","fe_3","fe_4","fe_5","fe_6","fe_7","fe_8","fe_9","fe_10",
+                                  "fe_11","fe_12","fe_13","fe_14","fe_15","fe_16","fe_17","fe_18","fe_19","fe_20") #clickstream
+
     
     # save gold table 
     partition_name = "gold_feature_store_" + snapshot_date_str.replace('-','_') + '.parquet'
